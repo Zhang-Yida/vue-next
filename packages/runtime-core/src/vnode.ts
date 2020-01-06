@@ -15,11 +15,13 @@ import {
 import { RawSlots } from './componentSlots'
 import { ShapeFlags } from './shapeFlags'
 import { isReactive, Ref } from '@vue/reactivity'
-import { AppContext } from './apiApp'
+import { AppContext } from './apiCreateApp'
 import { SuspenseBoundary } from './components/Suspense'
 import { DirectiveBinding } from './directives'
 import { SuspenseImpl } from './components/Suspense'
-import { TransitionData } from './components/Transition'
+import { TransitionHooks } from './components/BaseTransition'
+import { warn } from './warning'
+import { currentScopeId } from './helpers/scopeId'
 
 export const Fragment = (Symbol(__DEV__ ? 'Fragment' : undefined) as any) as {
   __isFragment: true
@@ -89,11 +91,12 @@ export interface VNode<HostNode = any, HostElement = any> {
   props: VNodeProps | null
   key: string | number | null
   ref: string | Ref | ((ref: object | null) => void) | null
+  scopeId: string | null // SFC only
   children: NormalizedChildren<HostNode, HostElement>
   component: ComponentInternalInstance | null
   suspense: SuspenseBoundary<HostNode, HostElement> | null
   dirs: DirectiveBinding[] | null
-  transition: TransitionData | null
+  transition: TransitionHooks | null
 
   // DOM
   el: HostNode | null
@@ -184,6 +187,15 @@ export function isVNode(value: any): value is VNode {
 }
 
 export function isSameVNodeType(n1: VNode, n2: VNode): boolean {
+  if (
+    __BUNDLER__ &&
+    __DEV__ &&
+    n2.shapeFlag & ShapeFlags.COMPONENT &&
+    (n2.type as Component).__hmrUpdated
+  ) {
+    // HMR only: if the component has been hot-updated, force a reload.
+    return false
+  }
   return n1.type === n2.type && n1.key === n2.key
 }
 
@@ -194,6 +206,11 @@ export function createVNode(
   patchFlag: number = 0,
   dynamicProps: string[] | null = null
 ): VNode {
+  if (__DEV__ && !type) {
+    warn(`Invalid vnode type when creating vnode: ${type}.`)
+    type = Comment
+  }
+
   // class & style normalization.
   if (props !== null) {
     // for reactive or proxy objects, we need to clone it to enable mutation.
@@ -231,6 +248,7 @@ export function createVNode(
     props,
     key: (props !== null && props.key) || null,
     ref: (props !== null && props.ref) || null,
+    scopeId: currentScopeId,
     children: null,
     component: null,
     suspense: null,
@@ -281,6 +299,7 @@ export function cloneVNode<T, U>(
       : vnode.props,
     key: vnode.key,
     ref: vnode.ref,
+    scopeId: vnode.scopeId,
     children: vnode.children,
     target: vnode.target,
     shapeFlag: vnode.shapeFlag,
@@ -330,8 +349,13 @@ export function normalizeVNode<T, U>(child: VNodeChild<T, U>): VNode<T, U> {
     return child.el === null ? child : cloneVNode(child)
   } else {
     // primitive types
-    return createVNode(Text, null, child + '')
+    return createVNode(Text, null, String(child))
   }
+}
+
+// optimized normalization for template-compiled render fns
+export function cloneIfMounted(child: VNode): VNode {
+  return child.el === null ? child : cloneVNode(child)
 }
 
 export function normalizeChildren(vnode: VNode, children: unknown) {
@@ -346,7 +370,7 @@ export function normalizeChildren(vnode: VNode, children: unknown) {
     children = { default: children }
     type = ShapeFlags.SLOTS_CHILDREN
   } else {
-    children = isString(children) ? children : children + ''
+    children = String(children)
     type = ShapeFlags.TEXT_CHILDREN
   }
   vnode.children = children as NormalizedChildren
