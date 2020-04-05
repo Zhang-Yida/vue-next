@@ -1,31 +1,36 @@
-import { ComponentInternalInstance, Data, Emit } from './component'
+import { ComponentInternalInstance, Data } from './component'
 import { nextTick, queueJob } from './scheduler'
 import { instanceWatch } from './apiWatch'
-import { EMPTY_OBJ, hasOwn, isGloballyWhitelisted } from '@vue/shared'
+import { EMPTY_OBJ, hasOwn, isGloballyWhitelisted, NOOP } from '@vue/shared'
+import { ReactiveEffect, UnwrapRef } from '@vue/reactivity'
 import {
   ExtractComputedReturns,
   ComponentOptionsBase,
   ComputedOptions,
-  MethodOptions
-} from './apiOptions'
-import { UnwrapRef, ReactiveEffect } from '@vue/reactivity'
-import { warn } from './warning'
+  MethodOptions,
+  resolveMergedOptions
+} from './componentOptions'
+import { normalizePropsOptions } from './componentProps'
+import { EmitsOptions, EmitFn } from './componentEmits'
 import { Slots } from './componentSlots'
 import {
   currentRenderingInstance,
   markAttrsAccessed
 } from './componentRenderUtils'
+import { warn } from './warning'
 
 // public properties exposed on the proxy, which is used as the render context
 // in templates (as `this` in the render option)
 export type ComponentPublicInstance<
-  P = {},
-  B = {},
-  D = {},
+  P = {}, // props type extracted from props option
+  B = {}, // raw bindings returned from setup()
+  D = {}, // return from data()
   C extends ComputedOptions = {},
   M extends MethodOptions = {},
+  E extends EmitsOptions = {},
   PublicProps = P
 > = {
+  $: ComponentInternalInstance
   $data: D
   $props: PublicProps
   $attrs: Data
@@ -33,9 +38,9 @@ export type ComponentPublicInstance<
   $slots: Slots
   $root: ComponentInternalInstance | null
   $parent: ComponentInternalInstance | null
-  $emit: Emit
+  $emit: EmitFn<E>
   $el: any
-  $options: ComponentOptionsBase<P, B, D, C, M>
+  $options: ComponentOptionsBase<P, B, D, C, M, E>
   $forceUpdate: ReactiveEffect
   $nextTick: typeof nextTick
   $watch: typeof instanceWatch
@@ -51,7 +56,6 @@ const publicPropertiesMap: Record<
 > = {
   $: i => i,
   $el: i => i.vnode.el,
-  $cache: i => i.renderCache || (i.renderCache = []),
   $data: i => i.data,
   $props: i => i.propsProxy,
   $attrs: i => i.attrs,
@@ -60,32 +64,29 @@ const publicPropertiesMap: Record<
   $parent: i => i.parent,
   $root: i => i.root,
   $emit: i => i.emit,
-  $options: i => i.type,
+  $options: i => (__FEATURE_OPTIONS__ ? resolveMergedOptions(i) : i.type),
   $forceUpdate: i => () => queueJob(i.update),
   $nextTick: () => nextTick,
-  $watch: i => instanceWatch.bind(i)
+  $watch: __FEATURE_OPTIONS__ ? i => instanceWatch.bind(i) : NOOP
 }
 
 const enum AccessTypes {
   DATA,
   CONTEXT,
-  PROPS
+  PROPS,
+  OTHER
 }
 
 export const PublicInstanceProxyHandlers: ProxyHandler<any> = {
   get(target: ComponentInternalInstance, key: string) {
-    // fast path for unscopables when using `with` block
-    if (__RUNTIME_COMPILE__ && (key as any) === Symbol.unscopables) {
-      return
-    }
     const {
       renderContext,
       data,
-      props,
       propsProxy,
       accessCache,
       type,
-      sink
+      sink,
+      appContext
     } = target
 
     // data / props / renderContext
@@ -104,40 +105,48 @@ export const PublicInstanceProxyHandlers: ProxyHandler<any> = {
             return renderContext[key]
           case AccessTypes.PROPS:
             return propsProxy![key]
+          // default: just fallthrough
         }
       } else if (data !== EMPTY_OBJ && hasOwn(data, key)) {
         accessCache![key] = AccessTypes.DATA
         return data[key]
-      } else if (hasOwn(renderContext, key)) {
+      } else if (renderContext !== EMPTY_OBJ && hasOwn(renderContext, key)) {
         accessCache![key] = AccessTypes.CONTEXT
         return renderContext[key]
-      } else if (hasOwn(props, key)) {
-        // only cache props access if component has declared (thus stable) props
-        if (type.props != null) {
+      } else if (type.props) {
+        // only cache other properties when instance has declared (thus stable)
+        // props
+        if (hasOwn(normalizePropsOptions(type.props)[0], key)) {
           accessCache![key] = AccessTypes.PROPS
+          // return the value from propsProxy for ref unwrapping and readonly
+          return propsProxy![key]
+        } else {
+          accessCache![key] = AccessTypes.OTHER
         }
-        // return the value from propsProxy for ref unwrapping and readonly
-        return propsProxy![key]
       }
     }
 
     // public $xxx properties & user-attached properties (sink)
     const publicGetter = publicPropertiesMap[key]
-    let cssModule
-    if (publicGetter != null) {
+    let cssModule, globalProperties
+    if (publicGetter) {
       if (__DEV__ && key === '$attrs') {
         markAttrsAccessed()
       }
       return publicGetter(target)
+    } else if (hasOwn(sink, key)) {
+      return sink[key]
     } else if (
-      __BUNDLER__ &&
-      (cssModule = type.__cssModules) != null &&
+      (cssModule = type.__cssModules) &&
       (cssModule = cssModule[key])
     ) {
       return cssModule
-    } else if (hasOwn(sink, key)) {
-      return sink[key]
-    } else if (__DEV__ && currentRenderingInstance != null) {
+    } else if (
+      ((globalProperties = appContext.config.globalProperties),
+      hasOwn(globalProperties, key))
+    ) {
+      return globalProperties[key]
+    } else if (__DEV__ && currentRenderingInstance) {
       warn(
         `Property ${JSON.stringify(key)} was accessed during render ` +
           `but is not defined on instance.`
@@ -151,7 +160,7 @@ export const PublicInstanceProxyHandlers: ProxyHandler<any> = {
       accessCache![key] !== undefined ||
       (data !== EMPTY_OBJ && hasOwn(data, key)) ||
       hasOwn(renderContext, key) ||
-      (type.props != null && hasOwn(type.props, key)) ||
+      (type.props && hasOwn(type.props, key)) ||
       hasOwn(publicPropertiesMap, key) ||
       hasOwn(sink, key)
     )
@@ -184,6 +193,13 @@ export const PublicInstanceProxyHandlers: ProxyHandler<any> = {
 
 export const runtimeCompiledRenderProxyHandlers = {
   ...PublicInstanceProxyHandlers,
+  get(target: ComponentInternalInstance, key: string) {
+    // fast path for unscopables when using `with` block
+    if ((key as any) === Symbol.unscopables) {
+      return
+    }
+    return PublicInstanceProxyHandlers.get!(target, key, target)
+  },
   has(_target: ComponentInternalInstance, key: string) {
     return key[0] !== '_' && !isGloballyWhitelisted(key)
   }

@@ -526,7 +526,6 @@ describe('compiler: parse', () => {
         tagType: ElementTypes.ELEMENT,
         codegenNode: undefined,
         props: [],
-
         isSelfClosing: false,
         children: [],
         loc: {
@@ -583,6 +582,24 @@ describe('compiler: parse', () => {
       })
     })
 
+    test('template element with directives', () => {
+      const ast = baseParse('<template v-if="ok"></template>')
+      const element = ast.children[0]
+      expect(element).toMatchObject({
+        type: NodeTypes.ELEMENT,
+        tagType: ElementTypes.TEMPLATE
+      })
+    })
+
+    test('template element without directives', () => {
+      const ast = baseParse('<template></template>')
+      const element = ast.children[0]
+      expect(element).toMatchObject({
+        type: NodeTypes.ELEMENT,
+        tagType: ElementTypes.ELEMENT
+      })
+    })
+
     test('native element with `isNativeTag`', () => {
       const ast = baseParse('<div></div><comp></comp><Comp></Comp>', {
         isNativeTag: tag => tag === 'div'
@@ -620,6 +637,55 @@ describe('compiler: parse', () => {
         type: NodeTypes.ELEMENT,
         tag: 'comp',
         tagType: ElementTypes.ELEMENT
+      })
+
+      expect(ast.children[2]).toMatchObject({
+        type: NodeTypes.ELEMENT,
+        tag: 'Comp',
+        tagType: ElementTypes.COMPONENT
+      })
+    })
+
+    test('v-is without `isNativeTag`', () => {
+      const ast = baseParse(
+        `<div></div><div v-is="'foo'"></div><Comp></Comp>`,
+        {
+          isNativeTag: tag => tag === 'div'
+        }
+      )
+
+      expect(ast.children[0]).toMatchObject({
+        type: NodeTypes.ELEMENT,
+        tag: 'div',
+        tagType: ElementTypes.ELEMENT
+      })
+
+      expect(ast.children[1]).toMatchObject({
+        type: NodeTypes.ELEMENT,
+        tag: 'div',
+        tagType: ElementTypes.COMPONENT
+      })
+
+      expect(ast.children[2]).toMatchObject({
+        type: NodeTypes.ELEMENT,
+        tag: 'Comp',
+        tagType: ElementTypes.COMPONENT
+      })
+    })
+
+    test('v-is with `isNativeTag`', () => {
+      const ast = baseParse(`<div></div><div v-is="'foo'"></div><Comp></Comp>`)
+
+      expect(ast.children[0]).toMatchObject({
+        type: NodeTypes.ELEMENT,
+        tag: 'div',
+        tagType: ElementTypes.ELEMENT
+      })
+
+      expect(ast.children[1]).toMatchObject({
+        type: NodeTypes.ELEMENT,
+        tag: 'div',
+        tagType: ElementTypes.COMPONENT
       })
 
       expect(ast.children[2]).toMatchObject({
@@ -2590,17 +2656,6 @@ foo
             {
               type: ErrorCodes.UNEXPECTED_SOLIDUS_IN_TAG,
               loc: { offset: 16, line: 1, column: 17 }
-            }
-          ]
-        }
-      ],
-      UNKNOWN_NAMED_CHARACTER_REFERENCE: [
-        {
-          code: '<template>&unknown;</template>',
-          errors: [
-            {
-              type: ErrorCodes.UNKNOWN_NAMED_CHARACTER_REFERENCE,
-              loc: { offset: 10, line: 1, column: 11 }
             }
           ]
         }

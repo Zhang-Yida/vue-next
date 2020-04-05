@@ -5,7 +5,8 @@ import {
   render,
   nextTick,
   Ref,
-  defineComponent
+  defineComponent,
+  reactive
 } from '@vue/runtime-test'
 
 // reference: https://vue-composition-api-rfc.netlify.com/api.html#template-refs
@@ -142,7 +143,7 @@ describe('api: template refs', () => {
       foo: ref(null),
       bar: ref(null)
     }
-    const refKey: Ref<keyof typeof refs> = ref('foo')
+    const refKey = ref('foo') as Ref<keyof typeof refs>
 
     const Comp = {
       setup() {
@@ -175,5 +176,47 @@ describe('api: template refs', () => {
     toggle.value = false
     await nextTick()
     expect(el.value).toBe(null)
+  })
+
+  test('string ref inside slots', async () => {
+    const root = nodeOps.createElement('div')
+    const spy = jest.fn()
+    const Child = {
+      render(this: any) {
+        return this.$slots.default()
+      }
+    }
+
+    const Comp = {
+      render() {
+        return h(Child, () => {
+          return h('div', { ref: 'foo' })
+        })
+      },
+      mounted(this: any) {
+        spy(this.$refs.foo.tag)
+      }
+    }
+    render(h(Comp), root)
+
+    expect(spy).toHaveBeenCalledWith('div')
+  })
+
+  it('should work with direct reactive property', () => {
+    const root = nodeOps.createElement('div')
+    const state = reactive({
+      refKey: null
+    })
+
+    const Comp = {
+      setup() {
+        return state
+      },
+      render() {
+        return h('div', { ref: 'refKey' })
+      }
+    }
+    render(h(Comp), root)
+    expect(state.refKey).toBe(root.children[0])
   })
 })
