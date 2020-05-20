@@ -20,7 +20,7 @@ describe('component props', () => {
     let proxy: any
 
     const Comp = defineComponent({
-      props: ['foo'],
+      props: ['fooBar'],
       render() {
         props = this.$props
         attrs = this.$attrs
@@ -29,18 +29,25 @@ describe('component props', () => {
     })
 
     const root = nodeOps.createElement('div')
-    render(h(Comp, { foo: 1, bar: 2 }), root)
-    expect(proxy.foo).toBe(1)
-    expect(props).toEqual({ foo: 1 })
+    render(h(Comp, { fooBar: 1, bar: 2 }), root)
+    expect(proxy.fooBar).toBe(1)
+    expect(props).toEqual({ fooBar: 1 })
     expect(attrs).toEqual({ bar: 2 })
 
-    render(h(Comp, { foo: 2, bar: 3, baz: 4 }), root)
-    expect(proxy.foo).toBe(2)
-    expect(props).toEqual({ foo: 2 })
+    // test passing kebab-case and resolving to camelCase
+    render(h(Comp, { 'foo-bar': 2, bar: 3, baz: 4 }), root)
+    expect(proxy.fooBar).toBe(2)
+    expect(props).toEqual({ fooBar: 2 })
+    expect(attrs).toEqual({ bar: 3, baz: 4 })
+
+    // test updating kebab-case should not delete it (#955)
+    render(h(Comp, { 'foo-bar': 3, bar: 3, baz: 4 }), root)
+    expect(proxy.fooBar).toBe(3)
+    expect(props).toEqual({ fooBar: 3 })
     expect(attrs).toEqual({ bar: 3, baz: 4 })
 
     render(h(Comp, { qux: 5 }), root)
-    expect(proxy.foo).toBeUndefined()
+    expect(proxy.fooBar).toBeUndefined()
     expect(props).toEqual({})
     expect(attrs).toEqual({ qux: 5 })
   })
@@ -149,13 +156,15 @@ describe('component props', () => {
 
   test('default value', () => {
     let proxy: any
+    const defaultFn = jest.fn(() => ({ a: 1 }))
+
     const Comp = {
       props: {
         foo: {
           default: 1
         },
         bar: {
-          default: () => ({ a: 1 })
+          default: defaultFn
         }
       },
       render() {
@@ -166,11 +175,32 @@ describe('component props', () => {
     const root = nodeOps.createElement('div')
     render(h(Comp, { foo: 2 }), root)
     expect(proxy.foo).toBe(2)
+    const prevBar = proxy.bar
     expect(proxy.bar).toEqual({ a: 1 })
+    expect(defaultFn).toHaveBeenCalledTimes(1)
 
-    render(h(Comp, { foo: undefined, bar: { b: 2 } }), root)
+    // #999: updates should not cause default factory of unchanged prop to be
+    // called again
+    render(h(Comp, { foo: 3 }), root)
+    expect(proxy.foo).toBe(3)
+    expect(proxy.bar).toEqual({ a: 1 })
+    expect(proxy.bar).toBe(prevBar)
+    expect(defaultFn).toHaveBeenCalledTimes(1)
+
+    render(h(Comp, { bar: { b: 2 } }), root)
     expect(proxy.foo).toBe(1)
     expect(proxy.bar).toEqual({ b: 2 })
+    expect(defaultFn).toHaveBeenCalledTimes(1)
+
+    render(h(Comp, { foo: 3, bar: { b: 3 } }), root)
+    expect(proxy.foo).toBe(3)
+    expect(proxy.bar).toEqual({ b: 3 })
+    expect(defaultFn).toHaveBeenCalledTimes(1)
+
+    render(h(Comp, { bar: { b: 4 } }), root)
+    expect(proxy.foo).toBe(1)
+    expect(proxy.bar).toEqual({ b: 4 })
+    expect(defaultFn).toHaveBeenCalledTimes(1)
   })
 
   test('optimized props updates', async () => {

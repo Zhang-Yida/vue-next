@@ -12,6 +12,7 @@ const targetMap = new WeakMap<any, KeyToDepMap>()
 export interface ReactiveEffect<T = any> {
   (...args: any[]): T
   _isEffect: true
+  id: number
   active: boolean
   raw: () => T
   deps: Array<Dep>
@@ -21,7 +22,7 @@ export interface ReactiveEffect<T = any> {
 export interface ReactiveEffectOptions {
   lazy?: boolean
   computed?: boolean
-  scheduler?: (job: () => void) => void
+  scheduler?: (job: ReactiveEffect) => void
   onTrack?: (event: DebuggerEvent) => void
   onTrigger?: (event: DebuggerEvent) => void
   onStop?: () => void
@@ -41,7 +42,7 @@ export interface DebuggerEventExtraInfo {
 }
 
 const effectStack: ReactiveEffect[] = []
-export let activeEffect: ReactiveEffect | undefined
+let activeEffect: ReactiveEffect | undefined
 
 export const ITERATE_KEY = Symbol(__DEV__ ? 'iterate' : '')
 export const MAP_KEY_ITERATE_KEY = Symbol(__DEV__ ? 'Map key iterate' : '')
@@ -74,6 +75,8 @@ export function stop(effect: ReactiveEffect) {
   }
 }
 
+let uid = 0
+
 function createReactiveEffect<T = any>(
   fn: (...args: any[]) => T,
   options: ReactiveEffectOptions
@@ -96,6 +99,7 @@ function createReactiveEffect<T = any>(
       }
     }
   } as ReactiveEffect
+  effect.id = uid++
   effect._isEffect = true
   effect.active = true
   effect.raw = fn
@@ -137,11 +141,11 @@ export function track(target: object, type: TrackOpTypes, key: unknown) {
     return
   }
   let depsMap = targetMap.get(target)
-  if (depsMap === void 0) {
+  if (!depsMap) {
     targetMap.set(target, (depsMap = new Map()))
   }
   let dep = depsMap.get(key)
-  if (dep === void 0) {
+  if (!dep) {
     depsMap.set(key, (dep = new Set()))
   }
   if (!dep.has(activeEffect)) {
@@ -167,7 +171,7 @@ export function trigger(
   oldTarget?: Map<unknown, unknown> | Set<unknown>
 ) {
   const depsMap = targetMap.get(target)
-  if (depsMap === void 0) {
+  if (!depsMap) {
     // never been tracked
     return
   }
@@ -175,7 +179,7 @@ export function trigger(
   const effects = new Set<ReactiveEffect>()
   const computedRunners = new Set<ReactiveEffect>()
   const add = (effectsToAdd: Set<ReactiveEffect> | undefined) => {
-    if (effectsToAdd !== void 0) {
+    if (effectsToAdd) {
       effectsToAdd.forEach(effect => {
         if (effect !== activeEffect || !shouldTrack) {
           if (effect.options.computed) {
@@ -234,7 +238,7 @@ export function trigger(
         oldTarget
       })
     }
-    if (effect.options.scheduler !== void 0) {
+    if (effect.options.scheduler) {
       effect.options.scheduler(effect)
     } else {
       effect()

@@ -6,7 +6,7 @@ import {
   TrackOpTypes,
   TriggerOpTypes,
   DebuggerEvent,
-  markNonReactive,
+  markRaw,
   ref
 } from '../src/index'
 import { ITERATE_KEY } from '../src/effect'
@@ -732,9 +732,9 @@ describe('reactivity/effect', () => {
     expect(dummy).toBe(3)
   })
 
-  it('markNonReactive', () => {
+  it('markRaw', () => {
     const obj = reactive({
-      foo: markNonReactive({
+      foo: markRaw({
         prop: 0
       })
     })
@@ -759,7 +759,7 @@ describe('reactivity/effect', () => {
     expect(fnSpy).toHaveBeenCalledTimes(1)
   })
 
-  it('should trigger all effects when array lenght is set 0', () => {
+  it('should trigger all effects when array length is set 0', () => {
     const observed: any = reactive([1])
     let dummy, record
     effect(() => {

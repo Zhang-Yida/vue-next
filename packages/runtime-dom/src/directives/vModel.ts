@@ -6,7 +6,13 @@ import {
   warn
 } from '@vue/runtime-core'
 import { addEventListener } from '../modules/events'
-import { isArray, looseEqual, looseIndexOf, invokeArrayFns } from '@vue/shared'
+import {
+  isArray,
+  looseEqual,
+  looseIndexOf,
+  invokeArrayFns,
+  toNumber
+} from '@vue/shared'
 
 type AssignerFn = (value: any) => void
 
@@ -33,15 +39,14 @@ function trigger(el: HTMLElement, type: string) {
   el.dispatchEvent(e)
 }
 
-function toNumber(val: string): number | string {
-  const n = parseFloat(val)
-  return isNaN(n) ? val : n
-}
-
 type ModelDirective<T> = ObjectDirective<T & { _assign: AssignerFn }>
 
 // We are exporting the v-model runtime directly as vnode hooks so that it can
-// be tree-shaken in case v-model is never used.
+// be tree-shaken in case v-model is never used. These are used by compilers
+// only and userland code should avoid relying on them.
+/**
+ * @internal
+ */
 export const vModelText: ModelDirective<
   HTMLInputElement | HTMLTextAreaElement
 > = {
@@ -49,7 +54,8 @@ export const vModelText: ModelDirective<
     el.value = value
     el._assign = getModelAssigner(vnode)
     const castToNumber = number || el.type === 'number'
-    addEventListener(el, lazy ? 'change' : 'input', () => {
+    addEventListener(el, lazy ? 'change' : 'input', e => {
+      if ((e.target as any).composing) return
       let domValue: string | number = el.value
       if (trim) {
         domValue = domValue.trim()
@@ -90,6 +96,9 @@ export const vModelText: ModelDirective<
   }
 }
 
+/**
+ * @internal
+ */
 export const vModelCheckbox: ModelDirective<HTMLInputElement> = {
   beforeMount(el, binding, vnode) {
     setChecked(el, binding, vnode)
@@ -135,6 +144,9 @@ function setChecked(
   }
 }
 
+/**
+ * @internal
+ */
 export const vModelRadio: ModelDirective<HTMLInputElement> = {
   beforeMount(el, { value }, vnode) {
     el.checked = looseEqual(value, vnode.props!.value)
@@ -151,6 +163,9 @@ export const vModelRadio: ModelDirective<HTMLInputElement> = {
   }
 }
 
+/**
+ * @internal
+ */
 export const vModelSelect: ModelDirective<HTMLSelectElement> = {
   // use mounted & updated because <select> relies on its children <option>s.
   mounted(el, { value }, vnode) {
@@ -212,6 +227,9 @@ function getCheckboxValue(
   return key in el ? el[key] : checked
 }
 
+/**
+ * @internal
+ */
 export const vModelDynamic: ObjectDirective<
   HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
 > = {

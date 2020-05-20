@@ -11,6 +11,7 @@ import {
 import { ComponentInternalInstance } from './component'
 import { callWithAsyncErrorHandling, ErrorCodes } from './errorHandling'
 import { warn } from './warning'
+import { normalizePropsOptions } from './componentProps'
 
 export type ObjectEmitsOptions = Record<
   string,
@@ -28,12 +29,12 @@ export type EmitFn<
   Options = ObjectEmitsOptions,
   Event extends keyof Options = keyof Options
 > = Options extends any[]
-  ? (event: Options[0], ...args: any[]) => unknown[]
+  ? (event: Options[0], ...args: any[]) => void
   : UnionToIntersection<
       {
         [key in Event]: Options[key] extends ((...args: infer Args) => any)
-          ? (event: key, ...args: Args) => unknown[]
-          : (event: key, ...args: any[]) => unknown[]
+          ? (event: key, ...args: Args) => void
+          : (event: key, ...args: any[]) => void
       }[Event]
     >
 
@@ -41,17 +42,20 @@ export function emit(
   instance: ComponentInternalInstance,
   event: string,
   ...args: any[]
-): any[] {
+) {
   const props = instance.vnode.props || EMPTY_OBJ
 
   if (__DEV__) {
     const options = normalizeEmitsOptions(instance.type.emits)
     if (options) {
       if (!(event in options)) {
-        warn(
-          `Component emitted event "${event}" but it is not declared in the ` +
-            `emits option.`
-        )
+        const propsOptions = normalizePropsOptions(instance.type.props)[0]
+        if (!propsOptions || !(`on` + capitalize(event) in propsOptions)) {
+          warn(
+            `Component emitted event "${event}" but it is neither declared in ` +
+              `the emits option nor as an "on${capitalize(event)}" prop.`
+          )
+        }
       } else {
         const validator = options[event]
         if (isFunction(validator)) {
@@ -66,23 +70,20 @@ export function emit(
     }
   }
 
-  let handler = props[`on${event}`] || props[`on${capitalize(event)}`]
+  let handler = props[`on${capitalize(event)}`]
   // for v-model update:xxx events, also trigger kebab-case equivalent
   // for props passed via kebab-case
-  if (!handler && event.indexOf('update:') === 0) {
+  if (!handler && event.startsWith('update:')) {
     event = hyphenate(event)
-    handler = props[`on${event}`] || props[`on${capitalize(event)}`]
+    handler = props[`on${capitalize(event)}`]
   }
   if (handler) {
-    const res = callWithAsyncErrorHandling(
+    callWithAsyncErrorHandling(
       handler,
       instance,
       ErrorCodes.COMPONENT_EVENT_HANDLER,
       args
     )
-    return isArray(res) ? res : [res]
-  } else {
-    return []
   }
 }
 

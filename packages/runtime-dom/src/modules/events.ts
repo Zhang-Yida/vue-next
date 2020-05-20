@@ -1,4 +1,4 @@
-import { EMPTY_OBJ, isString } from '@vue/shared'
+import { EMPTY_OBJ, isArray } from '@vue/shared'
 import {
   ComponentInternalInstance,
   callWithAsyncErrorHandling
@@ -71,16 +71,6 @@ export function patchEvent(
   nextValue: EventValueWithOptions | EventValue | null,
   instance: ComponentInternalInstance | null = null
 ) {
-  // support native onxxx handlers
-  if (rawName in el) {
-    if (isString(nextValue)) {
-      el.setAttribute(rawName, nextValue)
-    } else {
-      ;(el as any)[rawName] = nextValue
-    }
-    return
-  }
-
   const name = rawName.slice(2).toLowerCase()
   const prevOptions = prevValue && 'options' in prevValue && prevValue.options
   const nextOptions = nextValue && 'options' in nextValue && nextValue.options
@@ -140,7 +130,7 @@ function createInvoker(
     // AFTER it was attached.
     if (e.timeStamp >= invoker.lastUpdated - 1) {
       callWithAsyncErrorHandling(
-        invoker.value,
+        patchStopImmediatePropagation(e, invoker.value),
         instance,
         ErrorCodes.NATIVE_EVENT_HANDLER,
         [e]
@@ -151,4 +141,20 @@ function createInvoker(
   initialValue.invoker = invoker
   invoker.lastUpdated = getNow()
   return invoker
+}
+
+function patchStopImmediatePropagation(
+  e: Event,
+  value: EventValue
+): EventValue {
+  if (isArray(value)) {
+    const originalStop = e.stopImmediatePropagation
+    e.stopImmediatePropagation = () => {
+      originalStop.call(e)
+      ;(e as any)._stopped = true
+    }
+    return value.map(fn => (e: Event) => !(e as any)._stopped && fn(e))
+  } else {
+    return value
+  }
 }

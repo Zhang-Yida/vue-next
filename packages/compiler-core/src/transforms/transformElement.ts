@@ -20,7 +20,13 @@ import {
   DirectiveArguments,
   createVNodeCall
 } from '../ast'
-import { PatchFlags, PatchFlagNames, isSymbol, isOn } from '@vue/shared'
+import {
+  PatchFlags,
+  PatchFlagNames,
+  isSymbol,
+  isOn,
+  isObject
+} from '@vue/shared'
 import { createCompilerError, ErrorCodes } from '../errors'
 import {
   RESOLVE_DIRECTIVE,
@@ -40,7 +46,7 @@ import {
   findDir
 } from '../utils'
 import { buildSlots } from './vSlot'
-import { isStaticNode } from './hoistStatic'
+import { getStaticType } from './hoistStatic'
 
 // some directive transforms (e.g. v-model) may return a symbol for runtime
 // import, which should be used instead of a resolveDirective call.
@@ -68,6 +74,8 @@ export const transformElement: NodeTransform = (node, context) => {
     const vnodeTag = isComponent
       ? resolveComponentType(node as ComponentNode, context)
       : `"${tag}"`
+    const isDynamicComponent =
+      isObject(vnodeTag) && vnodeTag.callee === RESOLVE_DYNAMIC_COMPONENT
 
     let vnodeProps: VNodeCall['props']
     let vnodeChildren: VNodeCall['children']
@@ -78,15 +86,17 @@ export const transformElement: NodeTransform = (node, context) => {
     let vnodeDirectives: VNodeCall['directives']
 
     let shouldUseBlock =
-      !isComponent &&
-      // <svg> and <foreignObject> must be forced into blocks so that block
-      // updates inside get proper isSVG flag at runtime. (#639, #643)
-      // This is technically web-specific, but splitting the logic out of core
-      // leads to too much unnecessary complexity.
-      (tag === 'svg' ||
-        tag === 'foreignObject' ||
-        // #938: elements with dynamic keys should be forced into blocks
-        findProp(node, 'key', true))
+      // dynamic component may resolve to plain elements
+      isDynamicComponent ||
+      (!isComponent &&
+        // <svg> and <foreignObject> must be forced into blocks so that block
+        // updates inside get proper isSVG flag at runtime. (#639, #643)
+        // This is technically web-specific, but splitting the logic out of core
+        // leads to too much unnecessary complexity.
+        (tag === 'svg' ||
+          tag === 'foreignObject' ||
+          // #938: elements with dynamic keys should be forced into blocks
+          findProp(node, 'key', true)))
 
     // props
     if (props.length > 0) {
@@ -146,7 +156,7 @@ export const transformElement: NodeTransform = (node, context) => {
         const hasDynamicTextChild =
           type === NodeTypes.INTERPOLATION ||
           type === NodeTypes.COMPOUND_EXPRESSION
-        if (hasDynamicTextChild && !isStaticNode(child)) {
+        if (hasDynamicTextChild && !getStaticType(child)) {
           patchFlag |= PatchFlags.TEXT
         }
         // pass directly if the only child is a text node
@@ -282,16 +292,16 @@ export function buildProps(
         value.type === NodeTypes.JS_CACHE_EXPRESSION ||
         ((value.type === NodeTypes.SIMPLE_EXPRESSION ||
           value.type === NodeTypes.COMPOUND_EXPRESSION) &&
-          isStaticNode(value))
+          getStaticType(value) > 0)
       ) {
         // skip if the prop is a cached handler or has constant value
         return
       }
       if (name === 'ref') {
         hasRef = true
-      } else if (name === 'class') {
+      } else if (name === 'class' && !isComponent) {
         hasClassBinding = true
-      } else if (name === 'style') {
+      } else if (name === 'style' && !isComponent) {
         hasStyleBinding = true
       } else if (name !== 'key' && !dynamicPropNames.includes(name)) {
         dynamicPropNames.push(name)

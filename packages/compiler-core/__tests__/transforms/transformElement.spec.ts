@@ -739,6 +739,15 @@ describe('compiler: element transform', () => {
       expect(node.dynamicProps).toBe(`["foo", "baz"]`)
     })
 
+    // should treat `class` and `style` as PROPS
+    test('PROPS on component', () => {
+      const { node } = parseWithBind(
+        `<Foo :id="foo" :class="cls" :style="styl" />`
+      )
+      expect(node.patchFlag).toBe(genFlagText(PatchFlags.PROPS))
+      expect(node.dynamicProps).toBe(`["id", "class", "style"]`)
+    })
+
     test('FULL_PROPS (v-bind)', () => {
       const { node } = parseWithBind(`<div v-bind="foo" />`)
       expect(node.patchFlag).toBe(genFlagText(PatchFlags.FULL_PROPS))
@@ -800,6 +809,7 @@ describe('compiler: element transform', () => {
       const { node, root } = parseWithBind(`<component is="foo" />`)
       expect(root.helpers).toContain(RESOLVE_DYNAMIC_COMPONENT)
       expect(node).toMatchObject({
+        isBlock: true,
         tag: {
           callee: RESOLVE_DYNAMIC_COMPONENT,
           arguments: [
@@ -817,6 +827,7 @@ describe('compiler: element transform', () => {
       const { node, root } = parseWithBind(`<component :is="foo" />`)
       expect(root.helpers).toContain(RESOLVE_DYNAMIC_COMPONENT)
       expect(node).toMatchObject({
+        isBlock: true,
         tag: {
           callee: RESOLVE_DYNAMIC_COMPONENT,
           arguments: [
